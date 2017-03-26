@@ -1,0 +1,169 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Andreas Hager"
+date: "26/3/2017"
+output:
+  html_document: default
+  pdf_document: default
+header-includes: \usepackage[utf8]{inputenc} \DeclareUnicodeCharacter{2001}{\dash}
+---
+
+
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache=TRUE, echo = TRUE )
+```
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+### What you should submit
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+## Analysis
+Summary of approach
+
+0. Load the data set and briefly learn the characteristics of the data
+1. Use cross-validation method to built a valid model; 70% of the original data is used for model building (training data) while the rest of 30% of the data is used for testing (testing data)
+2. Since the number of variables in the training data is too large, clean the data by 1) excluding variables which apparently cannot be explanatory variables, and 2) reducing variables with little information.-
+3. Apply PCA to reduce the number of variables
+4. Apply random forest method to build a model
+5. Check the model with the testing data set
+6. Discussion of the model / results
+
+Afterwards the model is applied to the test_set of the source mentioned above.
+
+## Data Processing
+### 0.  Read Raw data into your current working directory
+Raw data is loaded into the current working directory and stored into a local R table called train_set and test_set.
+Required libaries are loaded.
+```{r}
+ library(lattice)
+ library(RGtk2)
+ library(ggplot2)
+ library(caret)
+ library(rpart)
+ library(rpart.plot)
+ library(RColorBrewer)
+ library(rattle)
+ library(randomForest)
+     # download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+     #                                destfile="./pml-training.csv", method="curl")
+     # download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+     #                                destfile="./pml-testing.csv", method="curl")
+
+     train_set <- read.csv("pml-training.csv")
+     test_set <- read.csv("pml-testing.csv")
+
+```
+
+### 1. Split data in training an testing data
+
+We will use training for the model training and testing for cross validation in section 5. Check with testing data. 
+
+```{r}  
+dim(train_set)
+# colnames(train_set)
+# summary(train_set)
+
+set.seed(6969)
+
+train <- createDataPartition(y=train_set$classe,p=.70,list=F)
+
+training <- train_set[train,]
+testing <- train_set[-train,]
+```
+### 2. Clean the training data
+```{r, results="hide"}
+#exclude identifier, timestamp, and window data (they cannot be used for prediction)
+Cl <- grep("name|timestamp|window|X", colnames(training), value=F) 
+trainingCl <- training[,-Cl]
+#select variables with high (over 95%) missing data --> exclude them from the analysis
+trainingCl[trainingCl==""] <- NA
+NArate <- apply(trainingCl, 2, function(x) sum(is.na(x)))/nrow(trainingCl)
+trainingCl <- trainingCl[!(NArate>0.95)]
+summary(trainingCl)
+```
+```{r}  
+dim(trainingCl)
+```
+Summary is hidden to save some space.
+
+### 3. Apply a PCA to reduce number of relevant variables
+Since the number of variables is still high, over 50, a Principal Component Aanalysis is applied. The result contains a set of of 25 variables. 
+```{r}
+preProc <- preProcess(trainingCl[,1:52],method="pca",thresh=.8) #12 components are required
+preProc <- preProcess(trainingCl[,1:52],method="pca",thresh=.9) #18 components are required
+preProc <- preProcess(trainingCl[,1:52],method="pca",thresh=.95) #25 components are required
+preProc <- preProcess(trainingCl[,1:52],method="pca",pcaComp=25) 
+# preProc$rotation
+trainingPC <- predict(preProc,trainingCl[,1:52])
+```
+Result of preProc$rotation is not printed to save some document space.
+```{r}  
+dim(trainingPC)
+```
+### 4. Apply Random forest method
+Apply ramdom forest method (non-bionominal outcome & large sample size)
+```{r}
+library(randomForest)
+
+modFitRF <- randomForest(trainingCl$classe ~ .,   data=trainingPC, do.trace=F)
+print(modFitRF) # view results   
+importance(modFitRF) # importance of each predictor
+```
+### 5. Check with testing data 
+
+This is the cross validation against the testing data. Split done in section 1. Split data in training an testing data
+
+```{r}
+testingCl <- testing[,-Cl]
+testingCl[testingCl==""] <- NA
+NArate <- apply(testingCl, 2, function(x) sum(is.na(x)))/nrow(testingCl)
+testingCl <- testingCl[!(NArate>0.95)]
+testingPC <- predict(preProc,testingCl[,1:52])
+confusionMatrix(testingCl$classe,predict(modFitRF,testingPC))
+``` 
+### 6. Discussion
+In this analyses, 19622 observations from weight lifting exercise are analyze to delimit a prediction of correct body movement that can be used on other peoples exercise. In 70% of the total observations (13737 observations) were used to build a model by random forest method, and the rest of 30% of the observations (5885 observations) were used for model cross-validation. The model statistics showed that the built model has the overall accuracy of 97% against the testing set. The sensitivity is between 92%-99% and the specificity is over 99% for all classes. The 5 classes ( A-E ) represent: 
+     class A is the data from correct exercise  
+     class B-E  are data from exercises done in a wrong way). 
+
+Overall, the model is well developed to predict the exercise classes during weight lifting. 
+We certainly must admit that the sample sice of the study will limit its usability to groups of people with similar pysical ability. The data was collected from 6 healthy and young particpants of the study. So the prediction may not fit the movment behavior of eg. elderly people.
+
+## Predict classes of 20 test data
+
+```{r}
+     
+
+dim(test_set)
+
+testdataCl <- test_set[,-Cl]
+testdataCl[testdataCl==""] <- NA
+NArate <- apply(testdataCl, 2, function(x) sum(is.na(x)))/nrow(testdataCl)
+testdataCl <- testdataCl[!(NArate>0.95)]
+testdataPC <- predict(preProc,testdataCl[,1:52])
+testdataCl$classe <- predict(modFitRF,testdataPC)
+testdataCl[,53:54]  # view the individual results   
+``` 
+
+```{r}
+``` 
+
+```{r}
+``` 
+
+  
